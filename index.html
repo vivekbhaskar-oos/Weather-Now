@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="WeatherNow brings current conditions, hourly forecasts, air quality and a seven-day forecast together."
+    />
+    <meta name="theme-color" content="#0e3152" />
+    <title>WeatherNow — Local weather, at a glance</title>
+    <link rel="stylesheet" href="style.css" />
+    <script src="script.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="#home" aria-label="WeatherNow home">
+          <span class="brand-mark" aria-hidden="true">☁</span>
+          <span>Weather<span class="brand-light">Now</span></span>
+        </a>
+
+        <nav class="main-nav" aria-label="Main navigation">
+          <a class="nav-link is-active" href="#home">Home</a>
+          <a class="nav-link" href="#forecast">Forecast</a>
+          <a class="nav-link" href="#map">Maps</a>
+          <a class="nav-link" href="#details">Alerts</a>
+          <a class="nav-link" href="#forecast">News</a>
+          <a class="nav-link" href="#about">About</a>
+          <a class="nav-link" href="#contact">Contact</a>
+        </nav>
+
+        <form class="search-form" id="search-form" role="search">
+          <label class="sr-only" for="city-search">Search for a city</label>
+          <input
+            id="city-search"
+            name="city"
+            type="search"
+            placeholder="Search city..."
+            autocomplete="off"
+            aria-autocomplete="list"
+            aria-controls="city-suggestions"
+            aria-expanded="false"
+          />
+          <button class="search-button" type="submit" aria-label="Search city">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="10.8" cy="10.8" r="6.6"></circle>
+              <path d="m16 16 4.3 4.3"></path>
+            </svg>
+          </button>
+          <div class="suggestions-menu" id="city-suggestions" hidden>
+            <div
+              class="suggestion-query-status"
+              id="suggestion-query-status"
+              role="status"
+              hidden
+            ></div>
+            <div
+              class="suggestion-list"
+              id="suggestion-list"
+              role="listbox"
+              aria-label="Matching cities, villages, and districts"
+            ></div>
+            <a
+              class="suggestion-attribution"
+              href="https://www.openstreetmap.org/copyright"
+              target="_blank"
+              rel="noreferrer"
+            >Place data © OpenStreetMap contributors</a>
+          </div>
+        </form>
+        <button class="unit-toggle" id="unit-toggle" type="button" aria-label="Switch to Fahrenheit">
+          °C
+        </button>
+        <button
+          class="theme-toggle"
+          id="theme-toggle"
+          type="button"
+          aria-label="Switch to dark theme"
+          aria-pressed="false"
+        >
+          <span class="theme-icon" aria-hidden="true">☾</span>
+          <span id="theme-label">Dark</span>
+        </button>
+      </header>
+
+      <main id="home">
+        <section class="weather-scene" aria-label="Current weather">
+          <div class="scene-shade"></div>
+          <div class="hero-content">
+            <section class="current-weather" aria-live="polite">
+              <div class="location-heading">
+                <h1 id="city-name">Finding your location…</h1>
+                <span class="pin-icon" aria-hidden="true">●</span>
+                <button
+                  class="location-button"
+                  id="location-button"
+                  type="button"
+                  aria-label="Use my current location"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 21s7-6.2 7-12a7 7 0 1 0-14 0c0 5.8 7 12 7 12Z"></path>
+                    <circle cx="12" cy="9" r="2.2"></circle>
+                  </svg>
+                  <span>Use my current location</span>
+                </button>
+              </div>
+              <p class="current-date" id="current-date">Allow location access or search for a place</p>
+              <div class="temperature-row">
+                <span class="weather-symbol" id="current-icon" aria-hidden="true">⛅</span>
+                <div class="temperature-copy">
+                  <div class="temperature" id="current-temperature">--<span>°C</span></div>
+                  <p class="condition" id="current-condition">Finding your local forecast</p>
+                  <p class="feels-like" id="feels-like">Feels like --°</p>
+                </div>
+              </div>
+
+              <div class="quick-stats" aria-label="Current conditions">
+                <div class="quick-stat">
+                  <span class="stat-icon" aria-hidden="true">◌</span>
+                  <span class="stat-copy"><span>Humidity</span><strong id="humidity">--%</strong></span>
+                </div>
+                <div class="quick-stat">
+                  <span class="stat-icon" aria-hidden="true">↗</span>
+                  <span class="stat-copy"><span>Wind</span><strong id="wind-speed">-- km/h</strong></span>
+                </div>
+                <div class="quick-stat">
+                  <span class="stat-icon" aria-hidden="true">◉</span>
+                  <span class="stat-copy"><span>Pressure</span><strong id="pressure">---- hPa</strong></span>
+                </div>
+                <div class="quick-stat">
+                  <span class="stat-icon" aria-hidden="true">◉</span>
+                  <span class="stat-copy"><span>Visibility</span><strong id="visibility">-- km</strong></span>
+                </div>
+              </div>
+            </section>
+
+            <div class="hero-side">
+              <section class="glass-panel hourly-panel" aria-labelledby="hourly-title">
+                <div class="panel-heading">
+                  <h2 id="hourly-title">Hourly Forecast</h2>
+                  <span class="live-dot">Live</span>
+                </div>
+                <div class="hourly-list" id="hourly-forecast" aria-live="polite">
+                  <span class="loading-note">Loading forecast…</span>
+                </div>
+              </section>
+              <section class="glass-panel air-panel" aria-labelledby="air-title">
+                <div class="panel-heading">
+                  <h2 id="air-title">Air Quality Index</h2>
+                  <span class="air-leaf" aria-hidden="true">❧</span>
+                </div>
+                <div class="air-content">
+                  <strong class="aqi-number" id="aqi-number">--</strong>
+                  <div>
+                    <strong class="aqi-label" id="aqi-label">Checking air quality</strong>
+                    <p id="aqi-description">Local air quality information</p>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
+          <p class="status-message" id="status-message" role="status" aria-live="polite"></p>
+        </section>
+
+        <section class="dashboard-grid" aria-label="Forecast and local weather details">
+          <section class="dashboard-card forecast-card" id="forecast" aria-labelledby="forecast-title">
+            <div class="card-heading">
+              <h2 id="forecast-title">7-Day Forecast</h2>
+              <span class="card-subtitle">The week ahead</span>
+            </div>
+            <div class="daily-list" id="daily-forecast" aria-live="polite">
+              <span class="loading-note">Loading forecast…</span>
+            </div>
+          </section>
+
+          <section class="dashboard-card details-card" id="details" aria-labelledby="details-title">
+            <div class="card-heading">
+              <h2 id="details-title">Details</h2>
+            </div>
+            <dl class="details-list">
+              <div class="detail-row">
+                <dt><span aria-hidden="true">☼</span> Sunrise</dt>
+                <dd id="sunrise">--:--</dd>
+              </div>
+              <div class="detail-row">
+                <dt><span aria-hidden="true">☾</span> Sunset</dt>
+                <dd id="sunset">--:--</dd>
+              </div>
+              <div class="detail-row">
+                <dt><span aria-hidden="true">◉</span> UV Index</dt>
+                <dd id="uv-index">--</dd>
+              </div>
+              <div class="detail-row">
+                <dt><span aria-hidden="true">◉</span> Chance of Rain</dt>
+                <dd id="rain-chance">--%</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section class="dashboard-card radar-card" id="map" aria-labelledby="radar-title">
+            <div class="card-heading">
+              <h2 id="radar-title">Live Radar</h2>
+              <span class="radar-live"><span></span> Live</span>
+            </div>
+            <div class="map-frame">
+              <iframe
+                id="weather-map"
+                title="Interactive map showing the current city"
+                loading="lazy"
+                referrerpolicy="no-referrer"
+                src="https://www.openstreetmap.org/export/embed.html?bbox=77.12%2C28.56%2C77.30%2C28.68&amp;layer=mapnik&amp;marker=28.6139%2C77.2090"
+              ></iframe>
+            </div>
+            <a
+              class="map-link"
+              id="full-map-link"
+              href="https://www.openstreetmap.org/?mlat=28.6139&amp;mlon=77.2090#map=11/28.6139/77.2090"
+              target="_blank"
+              rel="noreferrer"
+            >View Full Map <span aria-hidden="true">↗</span></a>
+          </section>
+        </section>
+      </main>
+
+      <footer class="footer" id="about">
+        <p>© <span id="footer-year">2026</span> WeatherNow. Weather for wherever life takes you.</p>
+        <div class="footer-links">
+          <a href="#about">Privacy Policy</a>
+          <a href="#about">Terms of Service</a>
+          <a
+            class="footer-email"
+            id="contact"
+            href="mailto:vivekaryavivekarya1@gmail.com"
+          >
+            <svg class="footer-contact-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="3" y="5" width="18" height="14" rx="2"></rect>
+              <path d="m4 7 8 6 8-6"></path>
+            </svg>
+            <span>vivekaryavivekarya1@gmail.com</span>
+          </a>
+        </div>
+        <div class="social-links" aria-label="Social links">
+          <a
+            href="https://instagram.com/official_vivek_bhaskar___"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Instagram: @official_vivek_bhaskar___"
+          >
+            <svg class="footer-contact-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="3" y="3" width="18" height="18" rx="5"></rect>
+              <circle cx="12" cy="12" r="4"></circle>
+              <circle class="icon-fill" cx="17.5" cy="6.7" r="1"></circle>
+            </svg>
+            <span>@official_vivek_bhaskar___</span>
+          </a>
+          <a
+            href="https://github.com/vivekbhaskar-oss"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="GitHub: vivekbhaskar-oss"
+          >
+            <svg class="footer-contact-icon github-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.18-3.37-1.18-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.89 1.52 2.34 1.08 2.91.82.09-.65.35-1.08.64-1.33-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02a9.56 9.56 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.69-4.57 4.94.36.31.68.92.68 1.86v2.58c0 .26.18.57.69.48A10 10 0 0 0 12 2Z"
+              ></path>
+            </svg>
+            <span>vivekbhaskar-oss</span>
+          </a>
+        </div>
+        <form class="feedback-form" id="feedback-form">
+          <span class="feedback-title">Feedback</span>
+          <div class="feedback-options" role="radiogroup" aria-label="Rate WeatherNow">
+            <label>
+              <input type="radio" name="rating" value="Good" required />
+              <span>Good</span>
+            </label>
+            <label>
+              <input type="radio" name="rating" value="Could be better" />
+              <span>Could be better</span>
+            </label>
+            <label>
+              <input type="radio" name="rating" value="Not good" />
+              <span>Not good</span>
+            </label>
+          </div>
+          <button class="feedback-submit" type="submit">Send</button>
+          <span class="feedback-status" id="feedback-status" role="status" aria-live="polite"></span>
+        </form>
+      </footer>
+    </div>
+  </body>
+</html>
