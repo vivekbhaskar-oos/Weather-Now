@@ -3,6 +3,8 @@ const GEOCODING_BASE = "https://geocoding-api.open-meteo.com/v1/search";
 const AIR_QUALITY_BASE = "https://air-quality-api.open-meteo.com/v1/air-quality";
 const REVERSE_GEOCODING_BASE =
   "https://api.bigdatacloud.net/data/reverse-geocode-client";
+const COUNTRY_GEOJSON_URL =
+  "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson";
 
 const elements = {
   searchForm: document.querySelector("#search-form"),
@@ -38,7 +40,15 @@ const elements = {
   statusMessage: document.querySelector("#status-message"),
   weatherMap: document.querySelector("#weather-map"),
   fullMapLink: document.querySelector("#full-map-link"),
+  countrySearch: document.querySelector("#country-search"),
+  countryList: document.querySelector("#country-list"),
+  countryCount: document.querySelector("#country-count"),
+  selectedCountry: document.querySelector("#selected-country"),
+  globe: document.querySelector("#world-globe"),
+  globeStatus: document.querySelector("#globe-status"),
 };
+
+const globeContext = elements.globe.getContext("2d");
 
 let isCelsius = true;
 let isDarkTheme = false;
@@ -80,6 +90,356 @@ const WEATHER_CODES = {
   96: ["Thunderstorm with hail", "⛈️"],
   99: ["Heavy thunderstorm", "⛈️"],
 };
+
+const COUNTRIES = `Afghanistan|Albania|Algeria|Andorra|Angola|Antigua and Barbuda|Argentina|Armenia|Australia|Austria|Azerbaijan|Bahamas|Bahrain|Bangladesh|Barbados|Belarus|Belgium|Belize|Benin|Bhutan|Bolivia|Bosnia and Herzegovina|Botswana|Brazil|Brunei|Bulgaria|Burkina Faso|Burundi|Cabo Verde|Cambodia|Cameroon|Canada|Central African Republic|Chad|Chile|China|Colombia|Comoros|Congo (Democratic Republic)|Congo (Republic)|Costa Rica|Côte d’Ivoire|Croatia|Cuba|Cyprus|Czechia|Denmark|Djibouti|Dominica|Dominican Republic|Ecuador|Egypt|El Salvador|Equatorial Guinea|Eritrea|Estonia|Eswatini|Ethiopia|Fiji|Finland|France|Gabon|Gambia|Georgia|Germany|Ghana|Greece|Grenada|Guatemala|Guinea|Guinea-Bissau|Guyana|Haiti|Honduras|Hungary|Iceland|India|Indonesia|Iran|Iraq|Ireland|Israel|Italy|Jamaica|Japan|Jordan|Kazakhstan|Kenya|Kiribati|Kuwait|Kyrgyzstan|Laos|Latvia|Lebanon|Lesotho|Liberia|Libya|Liechtenstein|Lithuania|Luxembourg|Madagascar|Malawi|Malaysia|Maldives|Mali|Malta|Marshall Islands|Mauritania|Mauritius|Mexico|Micronesia|Moldova|Monaco|Mongolia|Montenegro|Morocco|Mozambique|Myanmar|Namibia|Nauru|Nepal|Netherlands|New Zealand|Nicaragua|Niger|Nigeria|North Korea|North Macedonia|Norway|Oman|Pakistan|Palau|Palestine|Panama|Papua New Guinea|Paraguay|Peru|Philippines|Poland|Portugal|Qatar|Romania|Russia|Rwanda|Saint Kitts and Nevis|Saint Lucia|Saint Vincent and the Grenadines|Samoa|San Marino|Sao Tome and Principe|Saudi Arabia|Senegal|Serbia|Seychelles|Sierra Leone|Singapore|Slovakia|Slovenia|Solomon Islands|Somalia|South Africa|South Korea|South Sudan|Spain|Sri Lanka|Sudan|Suriname|Sweden|Switzerland|Syria|Tajikistan|Tanzania|Thailand|Timor-Leste|Togo|Tonga|Trinidad and Tobago|Tunisia|Türkiye|Turkmenistan|Tuvalu|Uganda|Ukraine|United Arab Emirates|United Kingdom|United States|Uruguay|Uzbekistan|Vanuatu|Vatican City|Venezuela|Vietnam|Yemen|Zambia|Zimbabwe`
+  .split("|")
+  .sort((first, second) => first.localeCompare(second));
+
+let selectedCountryName = "";
+let globeCountries = [];
+let globeRotation = { longitude: -20, latitude: 10 };
+let globeDrag = null;
+let globeFrame = 0;
+
+function normalizeCountryName(name) {
+  return name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function getCountryName(feature) {
+  return (
+    feature.properties.ADMIN ||
+    feature.properties.NAME ||
+    feature.properties.name ||
+    ""
+  );
+}
+
+function getCountryCentroid(feature) {
+  if (!feature.geometry) return null;
+  const polygons =
+    feature.geometry.type === "Polygon"
+      ? [feature.geometry.coordinates]
+      : feature.geometry.coordinates;
+  let outerRing = [];
+  for (const polygon of polygons) {
+    if (polygon[0] && polygon[0].length > outerRing.length) {
+      outerRing = polygon[0];
+    }
+  }
+  if (outerRing.length === 0) return null;
+
+  let longitudeX = 0;
+  let longitudeY = 0;
+  let latitude = 0;
+  for (const [longitude, pointLatitude] of outerRing) {
+    const radians = (longitude * Math.PI) / 180;
+    longitudeX += Math.cos(radians);
+    longitudeY += Math.sin(radians);
+    latitude += pointLatitude;
+  }
+
+  return {
+    longitude: (Math.atan2(longitudeY, longitudeX) * 180) / Math.PI,
+    latitude: latitude / outerRing.length,
+  };
+}
+
+function projectGlobePoint(longitude, latitude, centerX, centerY, radius) {
+  const longitudeRadians =
+    ((longitude - globeRotation.longitude) * Math.PI) / 180;
+  const latitudeRadians = (latitude * Math.PI) / 180;
+  const centerLatitude = (globeRotation.latitude * Math.PI) / 180;
+  const horizontal = Math.cos(latitudeRadians) * Math.sin(longitudeRadians);
+  const vertical = Math.sin(latitudeRadians);
+  const depth = Math.cos(latitudeRadians) * Math.cos(longitudeRadians);
+  const rotatedVertical =
+    vertical * Math.cos(centerLatitude) - depth * Math.sin(centerLatitude);
+  const rotatedDepth =
+    vertical * Math.sin(centerLatitude) + depth * Math.cos(centerLatitude);
+
+  return {
+    x: centerX + radius * horizontal,
+    y: centerY - radius * rotatedVertical,
+    depth: rotatedDepth,
+  };
+}
+
+function traceVisibleGlobeLine(context, points, centerX, centerY, radius) {
+  let previousVisible = false;
+  for (const [longitude, latitude] of points) {
+    const point = projectGlobePoint(
+      longitude,
+      latitude,
+      centerX,
+      centerY,
+      radius,
+    );
+    if (point.depth > 0) {
+      if (!previousVisible) context.moveTo(point.x, point.y);
+      else context.lineTo(point.x, point.y);
+    }
+    previousVisible = point.depth > 0;
+  }
+}
+
+function traceGlobeRing(context, ring, centerX, centerY, radius) {
+  let pathOpen = false;
+  let previousVisible = false;
+
+  for (let index = 0; index < ring.length; index += 1) {
+    const [longitude, latitude] = ring[index];
+    const point = projectGlobePoint(
+      longitude,
+      latitude,
+      centerX,
+      centerY,
+      radius,
+    );
+    const visible = point.depth > 0;
+
+    if (visible) {
+      if (!previousVisible || !pathOpen) {
+        context.moveTo(point.x, point.y);
+        pathOpen = true;
+      } else {
+        context.lineTo(point.x, point.y);
+      }
+    } else {
+      pathOpen = false;
+    }
+    previousVisible = visible;
+  }
+}
+
+function drawGlobe() {
+  const canvas = elements.globe;
+  const bounds = canvas.getBoundingClientRect();
+  if (!bounds.width || !bounds.height) return;
+
+  const pixelRatio = window.devicePixelRatio || 1;
+  const width = Math.round(bounds.width * pixelRatio);
+  const height = Math.round(bounds.height * pixelRatio);
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+
+  const context = globeContext;
+  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  context.clearRect(0, 0, bounds.width, bounds.height);
+  const centerX = bounds.width / 2;
+  const centerY = bounds.height / 2;
+  const radius = Math.max(1, Math.min(bounds.width, bounds.height) / 2 - 4);
+
+  context.save();
+  context.beginPath();
+  context.arc(centerX, centerY, radius, 0, Math.PI * 2);
+  context.clip();
+
+  const ocean = context.createRadialGradient(
+    centerX - radius * 0.35,
+    centerY - radius * 0.4,
+    radius * 0.05,
+    centerX,
+    centerY,
+    radius * 1.35,
+  );
+  ocean.addColorStop(0, "#64c7ef");
+  ocean.addColorStop(1, "#14548f");
+  context.fillStyle = ocean;
+  context.fillRect(0, 0, bounds.width, bounds.height);
+
+  context.strokeStyle = "rgba(225, 248, 255, 0.22)";
+  context.lineWidth = 0.7;
+  for (const latitude of [-60, -30, 0, 30, 60]) {
+    context.beginPath();
+    const points = [];
+    for (let longitude = 0; longitude <= 360; longitude += 3) {
+      points.push([longitude - 180, latitude]);
+    }
+    traceVisibleGlobeLine(context, points, centerX, centerY, radius);
+    context.stroke();
+  }
+  for (const offset of [-60, -30, 0, 30, 60]) {
+    context.beginPath();
+    const points = [];
+    for (let latitude = -90; latitude <= 90; latitude += 3) {
+      points.push([globeRotation.longitude + offset, latitude]);
+    }
+    traceVisibleGlobeLine(context, points, centerX, centerY, radius);
+    context.stroke();
+  }
+
+  context.beginPath();
+  for (const country of globeCountries) {
+    const polygons =
+      country.feature.geometry.type === "Polygon"
+        ? [country.feature.geometry.coordinates]
+        : country.feature.geometry.coordinates;
+    for (const polygon of polygons) {
+      for (const ring of polygon) {
+        traceGlobeRing(context, ring, centerX, centerY, radius);
+      }
+    }
+  }
+  context.strokeStyle = "rgba(225, 255, 222, 0.85)";
+  context.lineWidth = 0.65;
+  context.stroke();
+
+  const labelPositions = [];
+  for (const country of globeCountries) {
+    const point = projectGlobePoint(
+      country.longitude,
+      country.latitude,
+      centerX,
+      centerY,
+      radius,
+    );
+    if (point.depth < 0.2) continue;
+
+    const isSelected = country.name === selectedCountryName;
+    const fontSize = Math.max(7, Math.min(10, radius * 0.075));
+    context.font = `${isSelected ? 700 : 500} ${fontSize}px "DM Sans", sans-serif`;
+    const labelWidth = context.measureText(country.name).width;
+    const labelBox = {
+      left: point.x - labelWidth / 2 - 3,
+      right: point.x + labelWidth / 2 + 3,
+      top: point.y - fontSize - 2,
+      bottom: point.y + 3,
+    };
+    if (
+      !isSelected &&
+      labelPositions.some(
+        (placed) =>
+          labelBox.left < placed.right + 2 &&
+          labelBox.right > placed.left - 2 &&
+          labelBox.top < placed.bottom + 2 &&
+          labelBox.bottom > placed.top - 2,
+      )
+    ) {
+      continue;
+    }
+
+    labelPositions.push(labelBox);
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.font = `${isSelected ? 700 : 500} ${fontSize}px "DM Sans", sans-serif`;
+    context.lineWidth = 2.5;
+    context.strokeStyle = "rgba(8, 32, 52, 0.85)";
+    context.strokeText(country.name, point.x, point.y);
+    context.fillStyle = isSelected ? "#fff2a8" : "#fff";
+    context.fillText(country.name, point.x, point.y);
+  }
+
+  context.restore();
+  context.beginPath();
+  context.arc(centerX, centerY, radius, 0, Math.PI * 2);
+  context.strokeStyle = "rgba(255, 255, 255, 0.65)";
+  context.lineWidth = 1.5;
+  context.stroke();
+}
+
+function queueGlobeDraw() {
+  if (globeFrame) return;
+  globeFrame = window.requestAnimationFrame(() => {
+    globeFrame = 0;
+    drawGlobe();
+  });
+}
+
+function findGlobeCountry(name) {
+  const normalizedName = normalizeCountryName(name);
+  const aliases = {
+    congodemocraticrepublic: ["democraticrepublicofthecongo", "drcongo"],
+    congorepublic: ["republicofthecongo", "congobrazzaville"],
+    coteivoire: ["ivorycoast"],
+    czechia: ["czechrepublic"],
+    palau: ["palau"],
+    palestine: ["stateofpalestine"],
+    russia: ["russianfederation"],
+    southkorea: ["republicofkorea", "korearepublicof", "southkorea"],
+    northkorea: ["democraticpeoplesrepublicofkorea", "koreademocraticpeoplesrepublicof"],
+    tanzania: ["unitedrepublicoftanzania"],
+    thegambia: ["gambia"],
+    turkey: ["turkiye"],
+    turkiye: ["turkey"],
+    unitedstates: ["unitedstatesofamerica"],
+    vietnam: ["vietnam"],
+  };
+  const candidates = [normalizedName, ...(aliases[normalizedName] || [])];
+  return globeCountries.find((country) =>
+    candidates.includes(normalizeCountryName(country.name)),
+  );
+}
+
+function loadCountryGeography() {
+  fetch(COUNTRY_GEOJSON_URL)
+    .then((response) => {
+      if (!response.ok) {
+        throw new Error(`Country map returned ${response.status}.`);
+      }
+      return response.json();
+    })
+    .then((geoJson) => {
+      globeCountries = geoJson.features
+        .map((feature) => {
+          const centroid = getCountryCentroid(feature);
+          return centroid
+            ? { feature, name: getCountryName(feature), ...centroid }
+            : null;
+        })
+        .filter((country) => country && country.name);
+      if (globeCountries.length === 0) {
+        throw new Error("Country borders were missing from the map data.");
+      }
+      elements.globeStatus.textContent =
+        "Drag to rotate; country names appear on the front of the globe.";
+      drawGlobe();
+    })
+    .catch((error) => {
+      elements.globeStatus.textContent =
+        `Country names could not be loaded: ${error.message}`;
+    });
+}
+
+function renderCountries(query = "") {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const matches = COUNTRIES.filter((country) =>
+    country.toLocaleLowerCase().includes(normalizedQuery),
+  );
+  const fragment = document.createDocumentFragment();
+
+  matches.forEach((country) => {
+    const option = document.createElement("button");
+    option.className = "country-option";
+    option.type = "button";
+    option.setAttribute("role", "option");
+    option.setAttribute(
+      "aria-selected",
+      String(country === selectedCountryName),
+    );
+    option.dataset.country = country;
+    option.textContent = country;
+    fragment.append(option);
+  });
+
+  if (matches.length === 0) {
+    const emptyMessage = document.createElement("p");
+    emptyMessage.className = "country-empty";
+    emptyMessage.textContent = "No countries found.";
+    fragment.append(emptyMessage);
+  }
+
+  elements.countryList.replaceChildren(fragment);
+  elements.countryCount.textContent =
+    matches.length === COUNTRIES.length
+      ? `${COUNTRIES.length} countries`
+      : `${matches.length} of ${COUNTRIES.length} countries`;
+}
 
 function getWeatherDescription(code) {
   return WEATHER_CODES[code] || ["Weather conditions", "🌤️"];
@@ -667,6 +1027,58 @@ async function loadWeather(location) {
   }
 }
 
+async function loadCountryWeather(countryName) {
+  if (!countryName) return;
+
+  const countryRequest = ++requestNumber;
+  elements.statusMessage.textContent = `Finding weather for ${countryName}…`;
+  const country = findGlobeCountry(countryName);
+
+  try {
+    let location;
+    if (country) {
+      location = {
+        name: countryName,
+        country: "",
+        latitude: country.latitude,
+        longitude: country.longitude,
+      };
+    } else {
+      const params = new URLSearchParams({
+        name: countryName,
+        count: "10",
+        language: "en",
+        format: "json",
+      });
+      const result = await fetchJson(`${GEOCODING_BASE}?${params}`);
+      if (countryRequest !== requestNumber) return;
+
+      const place = (result.results || []).find(
+        (candidate) =>
+          normalizeCountryName(candidate.name) ===
+            normalizeCountryName(countryName) ||
+          normalizeCountryName(candidate.country || "") ===
+            normalizeCountryName(countryName),
+      );
+      if (!place) {
+        throw new Error(`Could not find a weather location for ${countryName}.`);
+      }
+      location = {
+        name: countryName,
+        country: "",
+        latitude: place.latitude,
+        longitude: place.longitude,
+      };
+    }
+
+    if (countryRequest === requestNumber) await loadWeather(location);
+  } catch (error) {
+    if (countryRequest === requestNumber) {
+      elements.statusMessage.textContent = error.message;
+    }
+  }
+}
+
 async function searchCity(city) {
   const currentRequest = ++requestNumber;
   suggestionRequestNumber += 1;
@@ -868,6 +1280,119 @@ elements.searchInput.addEventListener("keydown", (event) => {
     suggestionRequestNumber += 1;
     closeSuggestions();
   }
+});
+
+renderCountries();
+drawGlobe();
+loadCountryGeography();
+new ResizeObserver(queueGlobeDraw).observe(elements.globe);
+
+function setSelectedCountry(countryName) {
+  selectedCountryName = countryName;
+  elements.selectedCountry.textContent = countryName || "Earth";
+  elements.countryList
+    .querySelectorAll(".country-option")
+    .forEach((option) => {
+      option.setAttribute(
+        "aria-selected",
+        String(option.dataset.country === countryName),
+      );
+    });
+  queueGlobeDraw();
+}
+
+function selectCountryAtGlobeCenter() {
+  const centeredCountry = globeCountries.reduce(
+    (closest, country) => {
+      const depth = projectGlobePoint(
+        country.longitude,
+        country.latitude,
+        0,
+        0,
+        1,
+      ).depth;
+      return depth > closest.depth ? { country, depth } : closest;
+    },
+    { country: null, depth: 0 },
+  ).country;
+  if (centeredCountry) setSelectedCountry(centeredCountry.name);
+}
+
+elements.countrySearch.addEventListener("input", () => {
+  renderCountries(elements.countrySearch.value);
+});
+
+elements.countryList.addEventListener("click", (event) => {
+  const option = event.target.closest(".country-option");
+  if (!option) return;
+
+  const countryName = option.dataset.country;
+  setSelectedCountry(countryName);
+  loadCountryWeather(countryName);
+  const country = findGlobeCountry(countryName);
+  if (country) {
+    globeRotation.longitude = country.longitude;
+    globeRotation.latitude = country.latitude;
+    queueGlobeDraw();
+  }
+});
+
+elements.globe.addEventListener("pointerdown", (event) => {
+  globeDrag = {
+    pointerId: event.pointerId,
+    x: event.clientX,
+    y: event.clientY,
+  };
+  elements.globe.setPointerCapture(event.pointerId);
+});
+
+elements.globe.addEventListener("pointermove", (event) => {
+  if (!globeDrag || globeDrag.pointerId !== event.pointerId) return;
+  const bounds = elements.globe.getBoundingClientRect();
+  globeRotation.longitude -=
+    ((event.clientX - globeDrag.x) / bounds.width) * 180;
+  globeRotation.latitude +=
+    ((event.clientY - globeDrag.y) / bounds.height) * 180;
+  globeRotation.latitude = Math.max(
+    -85,
+    Math.min(85, globeRotation.latitude),
+  );
+  globeDrag.x = event.clientX;
+  globeDrag.y = event.clientY;
+  selectCountryAtGlobeCenter();
+  queueGlobeDraw();
+});
+
+function endGlobeDrag(event) {
+  if (globeDrag?.pointerId !== event.pointerId) return;
+  globeDrag = null;
+  selectCountryAtGlobeCenter();
+  loadCountryWeather(selectedCountryName);
+}
+
+elements.globe.addEventListener("pointerup", endGlobeDrag);
+elements.globe.addEventListener("pointercancel", (event) => {
+  if (globeDrag?.pointerId === event.pointerId) globeDrag = null;
+});
+elements.globe.addEventListener("keydown", (event) => {
+  const rotations = {
+    ArrowLeft: [-10, 0],
+    ArrowRight: [10, 0],
+    ArrowUp: [0, 10],
+    ArrowDown: [0, -10],
+  };
+  const rotation = rotations[event.key];
+  if (!rotation) return;
+
+  event.preventDefault();
+  globeRotation.longitude -= rotation[0];
+  globeRotation.latitude = Math.max(
+    -85,
+    Math.min(85, globeRotation.latitude + rotation[1]),
+  );
+  selectCountryAtGlobeCenter();
+  loadCountryWeather(selectedCountryName);
+  queueGlobeDraw();
 });
 
 elements.suggestionList.addEventListener("click", (event) => {
