@@ -9,6 +9,9 @@
     />
     <meta name="theme-color" content="#0e3152" />
     <title>WeatherNow — Local weather, at a glance</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icons/weather.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="icons/weather.svg" />
     <link rel="stylesheet" href="style.css" />
     <script src="script.js" defer></script>
   </head>
@@ -209,13 +212,12 @@
                 title="Interactive map showing the current city"
                 loading="lazy"
                 referrerpolicy="no-referrer"
-                src="https://www.openstreetmap.org/export/embed.html?bbox=77.12%2C28.56%2C77.30%2C28.68&amp;layer=mapnik&amp;marker=28.6139%2C77.2090"
               ></iframe>
             </div>
             <a
               class="map-link"
               id="full-map-link"
-              href="https://www.openstreetmap.org/?mlat=28.6139&amp;mlon=77.2090#map=11/28.6139/77.2090"
+              href="https://www.openstreetmap.org/"
               target="_blank"
               rel="noreferrer"
             >View Full Map <span aria-hidden="true">↗</span></a>
@@ -272,6 +274,9 @@
         <div class="footer-links">
           <a href="#about">Privacy Policy</a>
           <a href="#about">Terms of Service</a>
+          <button class="install-button" id="install-button" type="button" hidden>
+            Install app
+          </button>
           <a
             class="footer-email"
             id="contact"

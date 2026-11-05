@@ -919,6 +919,21 @@ html[data-theme="dark"] .nav-link.is-active {
   color: white;
 }
 
+.install-button {
+  padding: 5px 9px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 5px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.install-button:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+}
+
 .social-links {
   flex-wrap: wrap;
   gap: 14px;

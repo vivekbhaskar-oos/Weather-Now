@@ -3,6 +3,8 @@ const GEOCODING_BASE = "https://geocoding-api.open-meteo.com/v1/search";
 const AIR_QUALITY_BASE = "https://air-quality-api.open-meteo.com/v1/air-quality";
 const REVERSE_GEOCODING_BASE =
   "https://api.bigdatacloud.net/data/reverse-geocode-client";
+const OSM_REVERSE_GEOCODING_BASE =
+  "https://nominatim.openstreetmap.org/reverse";
 const COUNTRY_GEOJSON_URL =
   "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson";
 
@@ -44,6 +46,7 @@ const elements = {
   countryList: document.querySelector("#country-list"),
   countryCount: document.querySelector("#country-count"),
   selectedCountry: document.querySelector("#selected-country"),
+  installButton: document.querySelector("#install-button"),
   globe: document.querySelector("#world-globe"),
   globeStatus: document.querySelector("#globe-status"),
 };
@@ -58,7 +61,7 @@ let suggestionTimer;
 let suggestionRequestNumber = 0;
 let suggestedPlaces = [];
 let activeSuggestionIndex = -1;
-let preferredCountryCode = "IN";
+let preferredCountryCode = "";
 
 const WEATHER_CODES = {
   0: ["Clear sky", "☀️"],
@@ -100,6 +103,7 @@ let globeCountries = [];
 let globeRotation = { longitude: -20, latitude: 10 };
 let globeDrag = null;
 let globeFrame = 0;
+let installPromptEvent = null;
 
 function normalizeCountryName(name) {
   return name
@@ -507,6 +511,99 @@ function getLocationLabel(location) {
         ) === index,
     );
   return parts.join(", ");
+}
+
+async function getCurrentPlace(coords) {
+  const fetchReverseGeocode = async (url) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    try {
+      return await fetchJson(url, { signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
+  const osmParams = new URLSearchParams({
+    lat: coords.latitude,
+    lon: coords.longitude,
+    format: "jsonv2",
+    zoom: "14",
+    addressdetails: "1",
+  });
+  try {
+    const place = await fetchReverseGeocode(
+      `${OSM_REVERSE_GEOCODING_BASE}?${osmParams}`,
+    );
+    const address = place.address || {};
+    const name =
+      address.neighbourhood ||
+      address.suburb ||
+      address.city_district ||
+      address.quarter ||
+      address.village ||
+      address.town ||
+      address.city ||
+      address.hamlet ||
+      address.municipality;
+    if (name) {
+      const parentPlace =
+        address.city ||
+        address.town ||
+        address.village ||
+        address.municipality;
+      return {
+        name,
+        country: address.country || "",
+        countryCode: String(address.country_code || "").toUpperCase(),
+        admin1: address.state || "",
+        admin2:
+          (parentPlace && parentPlace !== name ? parentPlace : "") ||
+          (address.county !== name ? address.county || "" : ""),
+      };
+    }
+  } catch {
+    // Fall back to the second reverse-geocoding provider.
+  }
+
+  const bigDataParams = new URLSearchParams({
+    latitude: coords.latitude,
+    longitude: coords.longitude,
+    localityLanguage: "en",
+  });
+  try {
+    const place = await fetchReverseGeocode(
+      `${REVERSE_GEOCODING_BASE}?${bigDataParams}`,
+    );
+    const administrativeAreas = place.localityInfo?.administrative || [];
+    const administrativeArea =
+      administrativeAreas.find(
+        (area) => area.adminLevel === 5 && /district/i.test(area.name),
+      ) ||
+      administrativeAreas.find((area) => area.adminLevel === 5) ||
+      administrativeAreas.find(
+        (area) => area.adminLevel >= 6 && area.adminLevel <= 7,
+      );
+    const name =
+      place.city ||
+      place.locality ||
+      administrativeArea?.name ||
+      place.principalSubdivision;
+
+    if (name) {
+      return {
+        name,
+        country: place.countryName || "",
+        countryCode: String(place.countryCode || "").toUpperCase(),
+        admin1: place.principalSubdivision || "",
+        admin2: administrativeArea?.name !== name ? administrativeArea?.name : "",
+      };
+    }
+  } catch {
+    throw new Error("Both reverse-geocoding services could not find your place.");
+  }
+
+  throw new Error("No nearby place name was returned for these coordinates.");
 }
 
 function normalizePlaceName(name) {
@@ -1107,12 +1204,21 @@ async function searchCity(city) {
     }
 
     const normalizedCity = normalizePlaceName(city);
+    const exactMatches = places.filter(
+      (candidate) =>
+        normalizePlaceName(candidate.suggestionName || candidate.name) ===
+        normalizedCity,
+    );
+    if (exactMatches.length > 1) {
+      elements.statusMessage.textContent =
+        "Several places have that name. Choose the correct region.";
+      renderSuggestions(exactMatches, city);
+      elements.searchInput.focus();
+      return;
+    }
+
     const matchingPlace =
-      places.find(
-        (candidate) =>
-          normalizePlaceName(candidate.suggestionName || candidate.name) ===
-          normalizedCity,
-      ) ||
+      exactMatches[0] ||
       places.find((candidate) =>
         normalizedCity.startsWith(
           normalizePlaceName(candidate.suggestionName || candidate.name),
@@ -1153,67 +1259,44 @@ function useCurrentLocation() {
     async ({ coords }) => {
       if (locationRequest !== requestNumber) return;
       const location = {
-        name: "Your location",
+        name: "Current location",
         country: "",
         latitude: coords.latitude,
         longitude: coords.longitude,
       };
+      updateMap(coords.latitude, coords.longitude);
       const weatherLoad = loadWeather(location);
       const weatherRequest = requestNumber;
-      let locationNameUnavailable = false;
+      let locationNameError = null;
 
       try {
-        const params = new URLSearchParams({
-          latitude: coords.latitude,
-          longitude: coords.longitude,
-          localityLanguage: "en",
-        });
-        const place = await fetchJson(`${REVERSE_GEOCODING_BASE}?${params}`);
+        const place = await getCurrentPlace(coords);
         if (weatherRequest !== requestNumber) return;
 
-        const administrativeAreas = place.localityInfo?.administrative || [];
-        const administrativeArea =
-          administrativeAreas.find(
-            (area) =>
-              area.adminLevel === 5 &&
-              /district/i.test(area.name),
-          ) ||
-          administrativeAreas.find((area) => area.adminLevel === 5) ||
-          administrativeAreas.find(
-            (area) => area.adminLevel >= 6 && area.adminLevel <= 7,
-          );
-        const name =
-          place.city ||
-          place.locality ||
-          administrativeArea?.name ||
-          place.principalSubdivision;
-
-        if (name) {
-          location.name = name;
-          location.country = place.countryName || "";
-          preferredCountryCode =
-            String(place.countryCode || "").toUpperCase() ||
-            preferredCountryCode;
-          location.admin1 = place.principalSubdivision || "";
-          location.admin2 =
-            administrativeArea?.name !== name ? administrativeArea?.name : "";
-          elements.cityName.textContent = getLocationLabel(location);
-        } else {
-          locationNameUnavailable = true;
-        }
-      } catch {
+        Object.assign(location, place);
+        if (place.countryCode) preferredCountryCode = place.countryCode;
+        elements.cityName.textContent = getLocationLabel(location);
+      } catch (error) {
         if (weatherRequest !== requestNumber) return;
-        locationNameUnavailable = true;
+        locationNameError = error;
+        console.error("Could not look up the current place name:", error);
       }
 
       await weatherLoad;
       if (
         weatherRequest === requestNumber &&
-        locationNameUnavailable &&
+        locationNameError &&
         !elements.statusMessage.textContent
       ) {
         elements.statusMessage.textContent =
-          "Weather is shown for your location, but its city name could not be found.";
+          `Weather and the map use your device coordinates, but the nearby place name could not be found. Reported accuracy: about ${Math.round(coords.accuracy)} m.`;
+      } else if (
+        weatherRequest === requestNumber &&
+        coords.accuracy >= 1000 &&
+        !elements.statusMessage.textContent
+      ) {
+        elements.statusMessage.textContent =
+          `Your device reported an approximate location (about ${Math.round(coords.accuracy / 1000)} km accuracy). Check your device's location services for a more precise result.`;
       }
     },
     (error) => {
@@ -1230,7 +1313,7 @@ function useCurrentLocation() {
       }
       elements.statusMessage.textContent = message;
     },
-    { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 },
+    { enableHighAccuracy: true, timeout: 30000, maximumAge: 0 },
   );
 }
 
@@ -1448,6 +1531,39 @@ elements.themeToggle.addEventListener("click", () => {
 elements.locationButton.addEventListener("click", useCurrentLocation);
 document.querySelector("#footer-year").textContent = new Date().getFullYear();
 elements.cityName.textContent = "Your location";
+
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  installPromptEvent = event;
+  elements.installButton.hidden = false;
+});
+
+elements.installButton.addEventListener("click", async () => {
+  if (!installPromptEvent) return;
+
+  try {
+    await installPromptEvent.prompt();
+    await installPromptEvent.userChoice;
+    installPromptEvent = null;
+    elements.installButton.hidden = true;
+  } catch (error) {
+    elements.statusMessage.textContent = "The app could not be installed. Please try again.";
+    console.error("App installation prompt failed:", error);
+  }
+});
+
+window.addEventListener("appinstalled", () => {
+  installPromptEvent = null;
+  elements.installButton.hidden = true;
+});
+
+if ("serviceWorker" in navigator && window.isSecureContext) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch((error) => {
+      console.error("Service worker registration failed:", error);
+    });
+  });
+}
 elements.currentDate.textContent = "Allow location access to see local weather";
 elements.currentCondition.textContent = "Finding your local forecast";
 useCurrentLocation();
